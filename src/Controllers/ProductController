@@ -1,0 +1,118 @@
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.ApplicationInsights;
+using Microsoft.ApplicationInsights.DataContracts;
+
+namespace QuickShop.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+public class ProductController : ControllerBase
+{
+    private static List<Product> _products = new()
+    {
+        new Product { Id = 1, Name = "Laptop", Price = 999.99m, Category = "Electronics" },
+        new Product { Id = 2, Name = "Monitor", Price = 299.99m, Category = "Electronics" },
+        new Product { Id = 3, Name = "Keyboard", Price = 79.99m, Category = "Accessories" }
+    };
+
+    private readonly TelemetryClient _telemetryClient;
+    private readonly ILogger<ProductController> _logger;
+
+    public ProductController(TelemetryClient telemetryClient, ILogger<ProductController> logger)
+    {
+        _telemetryClient = telemetryClient;
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// Get all products
+    /// </summary>
+    [HttpGet]
+    public ActionResult<IEnumerable<Product>> GetAll()
+    {
+        _logger.LogInformation("GetAll products called");
+        _telemetryClient.TrackEvent("ProductController.GetAll");
+        return Ok(_products);
+    }
+
+    /// <summary>
+    /// Get product by ID
+    /// </summary>
+    [HttpGet("{id}")]
+    public ActionResult<Product> GetById(int id)
+    {
+        _logger.LogInformation("GetById called for product {ProductId}", id);
+        var product = _products.FirstOrDefault(p => p.Id == id);
+        
+        if (product == null)
+        {
+            _telemetryClient.TrackEvent("ProductController.GetById.NotFound", new Dictionary<string, string> { { "id", id.ToString() } });
+            _logger.LogWarning("Product {ProductId} not found", id);
+            return NotFound();
+        }
+
+        return Ok(product);
+    }
+
+    /// <summary>
+    /// Create a new product
+    /// </summary>
+    [HttpPost]
+    public ActionResult<Product> Create([FromBody] CreateProductRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name) || request.Price <= 0)
+        {
+            _logger.LogWarning("Invalid product request: {Request}", request);
+            return BadRequest("Name and positive price are required");
+        }
+
+        var newProduct = new Product
+        {
+            Id = _products.Max(p => p.Id) + 1,
+            Name = request.Name,
+            Price = request.Price,
+            Category = request.Category
+        };
+
+        _products.Add(newProduct);
+        _telemetryClient.TrackEvent("ProductController.Create", new Dictionary<string, string> { { "category", request.Category } });
+        _logger.LogInformation("Product created: {ProductId}", newProduct.Id);
+
+        return CreatedAtAction(nameof(GetById), new { id = newProduct.Id }, newProduct);
+    }
+
+    /// <summary>
+    /// Delete a product
+    /// </summary>
+    [HttpDelete("{id}")]
+    public ActionResult Delete(int id)
+    {
+        var product = _products.FirstOrDefault(p => p.Id == id);
+        if (product == null)
+        {
+            _logger.LogWarning("Delete failed: Product {ProductId} not found", id);
+            return NotFound();
+        }
+
+        _products.Remove(product);
+        _telemetryClient.TrackEvent("ProductController.Delete", new Dictionary<string, string> { { "id", id.ToString() } });
+        _logger.LogInformation("Product deleted: {ProductId}", id);
+
+        return NoContent();
+    }
+}
+
+public record Product
+{
+    public int Id { get; set; }
+    public required string Name { get; set; }
+    public decimal Price { get; set; }
+    public string Category { get; set; } = "General";
+}
+
+public record CreateProductRequest
+{
+    public required string Name { get; set; }
+    public decimal Price { get; set; }
+    public string Category { get; set; } = "General";
+}
